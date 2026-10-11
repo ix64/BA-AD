@@ -105,7 +105,25 @@ pub struct BaseDownloadArgs {
 
     /// Platform to download (android, ios, windows)
     #[arg(long, default_value = "android")]
-    pub platform: Platform
+    pub platform: Platform,
+
+    /// Write the files that would be downloaded to a JSON manifest instead of
+    /// downloading them
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["manifest", "report"])]
+    pub export_manifest: Option<PathBuf>,
+
+    /// Download exactly the files listed in a manifest written by
+    /// --export-manifest, without fetching the catalog
+    #[arg(
+        long,
+        value_name = "FILE",
+        conflicts_with_all = ["assets", "tables", "media", "filter", "platform"]
+    )]
+    pub manifest: Option<PathBuf>,
+
+    /// Write the outcome of every file to a JSON report
+    #[arg(long, value_name = "FILE")]
+    pub report: Option<PathBuf>
 }
 
 #[derive(Parser)]
@@ -114,12 +132,12 @@ pub struct GlobalDownloadArgs {
     pub base: BaseDownloadArgs,
 
     /// Download Teen assets
-    #[arg(long)]
+    #[arg(long, conflicts_with = "manifest")]
     pub teen: bool,
 
     /// Use this client build (e.g. 1.93.454564) instead of discovering the
     /// latest one
-    #[arg(long, value_name = "VERSION")]
+    #[arg(long, value_name = "VERSION", conflicts_with = "manifest")]
     pub client_version: Option<String>
 }
 

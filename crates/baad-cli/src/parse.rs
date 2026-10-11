@@ -4,7 +4,15 @@ use std::path::Path;
 use std::process::exit;
 
 use baad::catalog::{Catalog, ChinaCatalog, GlobalCatalog, JapanCatalog};
-use baad::download::{FilterMethod, ResourceCategory, ResourceDownloader, ResourceFilter};
+use baad::download::manifest::{self, MANIFEST_SCHEMA};
+use baad::download::{
+    FilterMethod,
+    Manifest,
+    Report,
+    ResourceCategory,
+    ResourceDownloader,
+    ResourceFilter
+};
 use baad::{
     API_FILENAME,
     ASSET_BUNDLES,
@@ -67,6 +75,15 @@ impl CommandHandler {
     }
 
     async fn handle_download(&self, region: &RegionCommands) -> Result<()> {
+        let (base, name) = match region {
+            RegionCommands::Global(args) => (&args.base, "global"),
+            RegionCommands::Japan(args) => (&args.base, "japan"),
+            RegionCommands::China(args) => (&args.base, "china")
+        };
+        if let Some(path) = &base.manifest {
+            return Self::manifest_download(base, name, path).await;
+        }
+
         match region {
             RegionCommands::Global(download_args) => self.global_download(download_args).await,
             RegionCommands::Japan(download_args) => self.japan_download(download_args).await,
@@ -81,7 +98,7 @@ impl CommandHandler {
         info!(platform = %platform.display_name(), "Starting Japan download");
 
         let catalog = JapanCatalog::new(categories, platform)?;
-        self.run_download(&args.base, catalog).await
+        Self::run_download(&args.base, catalog, "japan", BuildType::Standard).await
     }
 
     async fn global_download(&self, args: &GlobalDownloadArgs) -> Result<()> {
@@ -95,7 +112,7 @@ impl CommandHandler {
         if let Some(version) = &args.client_version {
             catalog = catalog.with_client_version(version);
         }
-        self.run_download(&args.base, catalog).await
+        Self::run_download(&args.base, catalog, "global", build_type).await
     }
 
     async fn china_download(&self, args: &ChinaDownloadArgs) -> Result<()> {
@@ -105,14 +122,24 @@ impl CommandHandler {
         info!(platform = %platform.display_name(), "Starting China download");
 
         let catalog = ChinaCatalog::new(categories, platform)?;
-        self.run_download(&args.base, catalog).await
+        Self::run_download(&args.base, catalog, "china", BuildType::Standard).await
     }
 
-    async fn run_download<C: Catalog>(&self, base: &BaseDownloadArgs, catalog: C) -> Result<()> {
+    async fn run_download<C: Catalog>(
+        base: &BaseDownloadArgs,
+        catalog: C,
+        region: &str,
+        build: BuildType
+    ) -> Result<()> {
         let filter = Self::resource_filter(base)?;
-        let output_dir = file::get_output_dir(Some(&base.output)).await?;
 
-        let mut downloads = catalog.prepare_downloads().await?;
+        let (source, resources, up_to_date) = catalog.fetch_resources().await?;
+        if up_to_date {
+            info!("Catalog up to date");
+        } else {
+            info!(success = true, "Catalog fetched successfully");
+        }
+        let mut downloads = catalog.build_downloads(resources, &source);
         for asset in &mut downloads.assets {
             Self::categorize_path(ASSET_BUNDLES, &mut asset.path);
         }
@@ -123,11 +150,50 @@ impl CommandHandler {
             Self::categorize_path(MEDIA_RESOURCES, &mut media.path);
         }
 
+        if let Some(path) = &base.export_manifest {
+            let build: &'static str = build.into();
+            let manifest = Manifest {
+                schema: MANIFEST_SCHEMA,
+                region: region.into(),
+                platform: base.platform.as_ref().into(),
+                build: build.to_lowercase(),
+                version: catalog.version().await,
+                source,
+                resources: manifest::plan(&downloads, filter.as_ref())
+            };
+            manifest.save(path).await?;
+            info!(
+                success = true,
+                files = manifest.resources.len(),
+                path = %path.display(),
+                "Manifest written"
+            );
+            return Ok(());
+        }
+
+        let downloader = Self::downloader(base).await?;
+        let report = downloader.download_with_report(&downloads, filter.as_ref()).await?;
+        Self::finish(base, &report).await
+    }
+
+    async fn manifest_download(base: &BaseDownloadArgs, region: &str, path: &Path) -> Result<()> {
+        let manifest = Manifest::load(path).await?;
+        manifest.validate(region)?;
+        info!(files = manifest.resources.len(), path = %path.display(), "Downloading manifest");
+
+        let downloader = Self::downloader(base).await?;
+        let report = downloader.download_entries(&manifest.resources).await?;
+        Self::finish(base, &report).await
+    }
+
+    async fn downloader(base: &BaseDownloadArgs) -> Result<ResourceDownloader> {
+        let output_dir = file::get_output_dir(Some(&base.output)).await?;
+
         if base.boost {
             warn!("Boost is enabled this will trigger CDN rate limiting");
         }
 
-        let downloader = ResourceDownloader::builder()
+        Ok(ResourceDownloader::builder()
             .output_dir(output_dir)
             .limit(base.limit as usize)
             .retries(base.retries)
@@ -136,9 +202,18 @@ impl CommandHandler {
             .max_chunks_per_file(if base.boost { 64 } else { 16 })
             .max_concurrent_chunks(if base.boost { 32 } else { 8 })
             .chunk_threshold(if base.boost { 2 * 1024 * 1024 } else { 10 * 1024 * 1024 })
-            .build();
+            .build())
+    }
 
-        downloader.download(downloads, filter.as_ref()).await?;
+    /// Writes the report, if requested, before failing on failed files.
+    async fn finish(base: &BaseDownloadArgs, report: &Report) -> Result<()> {
+        if let Some(path) = &base.report {
+            report.save(path).await?;
+        }
+        let failures = report.failures().map(ToString::to_string).collect::<Vec<_>>();
+        if !failures.is_empty() {
+            return Err(eyre!("{} downloads failed:\n{}", failures.len(), failures.join("\n")));
+        }
         Ok(())
     }
 
