@@ -1,3 +1,4 @@
+use std::env;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::process::exit;
@@ -58,6 +59,7 @@ impl CommandHandler {
         info!("Cleaning data...");
 
         let data_dir = file::data_dir()?;
+        refuse_unsafe_clean(data_dir)?;
         file::clear_all(data_dir).await?;
 
         info!(success = true, "Data cleared");
@@ -188,10 +190,33 @@ async fn invalidate_metadata(data_dir: &Path) -> Result<()> {
     }
 }
 
+/// `--clean` removes the whole data directory, so a custom one must not be a
+/// directory that contains the working directory or the home directory.
+fn refuse_unsafe_clean(data_dir: &Path) -> Result<()> {
+    let Ok(data_dir) = data_dir.canonicalize() else {
+        return Ok(());
+    };
+    let protected = [env::current_dir().ok(), env::home_dir()];
+    for path in protected.into_iter().flatten().filter_map(|path| path.canonicalize().ok()) {
+        if path.starts_with(&data_dir) {
+            return Err(eyre!(
+                "Refusing to clean {}: it contains {}",
+                data_dir.display(),
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn run(args: Args) -> Result<()> {
     if args.command.is_none() && !args.update && !args.clean {
         Args::command().print_help()?;
         exit(0);
+    }
+
+    if let Some(data_dir) = &args.data_dir {
+        file::set_data_dir(data_dir.clone())?;
     }
 
     let handler = CommandHandler::new(args);

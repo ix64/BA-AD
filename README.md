@@ -32,6 +32,9 @@ baad --update download china --media --filter "aris_"
 # Cleans everything, can also use to fix any problems
 baad --clean
 
+# Keep API data and catalogs in a separate directory
+baad --data-dir ./baad-data download japan --tables
+
 # Downloads the TableBundles from JP server and save it in a folder named Downloads
 baad download japan --tables --output ./Downloads
 
@@ -78,6 +81,7 @@ Filters still match the file name only.
 | `help`              |       | Print this message or the help of the given subcommand(s) |
 | `--update`          | `-u`  | Force update                                              |
 | `--clean`           | `-c`  | Cleans the cache                                          |
+| `--data-dir <DIR>`  |       | Use this directory for cached API data and catalogs       |
 | `--verbose=<LEVEL>` | `-v`  | Enable verbose output (`minimal`, `full`)                 |
 | `--help`            | `-h`  | Print help                                                |
 | `--version`         | `-V`  | Print version                                             |
