@@ -1,6 +1,7 @@
 use baad_shared::Downloads;
 use tracing::info;
 
+use crate::download::CatalogFile;
 use crate::error::CatalogError;
 
 #[allow(async_fn_in_trait)]
@@ -10,6 +11,11 @@ pub trait Catalog {
     async fn fetch_resources(&self) -> Result<(String, Self::Resources, bool), CatalogError>;
 
     fn build_downloads(&self, resources: Self::Resources, base_or_url: &str) -> Downloads;
+
+    /// Catalog files that `resources` publish but `build_downloads` skips.
+    fn catalog_files(&self, _resources: &Self::Resources, _base_or_url: &str) -> Vec<CatalogFile> {
+        Vec::new()
+    }
 
     /// Client version of the most recently fetched catalog, when known.
     async fn version(&self) -> Option<String> { None }

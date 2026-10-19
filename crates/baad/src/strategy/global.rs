@@ -12,7 +12,8 @@ use baad_shared::{
 use fastcat::fconcat;
 use tracing::warn;
 
-use crate::download::ResourceCategory;
+use crate::download::manifest::ManifestHash;
+use crate::download::{CatalogFile, ResourceCategory};
 
 pub struct GlobalStrategy;
 
@@ -67,6 +68,28 @@ impl GlobalStrategy {
         Downloads { assets, tables, media }
     }
 
+    /// The `Catalog/` files that `build_downloads` skips, with the size and
+    /// MD5 the resource catalog publishes for them.
+    pub fn catalog_files(resources: &[Resource], base_url: &str) -> Vec<CatalogFile> {
+        resources
+            .iter()
+            .filter(|resource| resource.resource_path.starts_with(CATALOG_PREFIX))
+            .filter_map(|resource| {
+                let Ok(size) = u64::try_from(resource.resource_size) else {
+                    warn!(path = %resource.resource_path, "Skipping catalog file with a negative size");
+                    return None;
+                };
+                Some(CatalogFile {
+                    path: resource.resource_path.clone(),
+                    url: fconcat!(base_url, resource.resource_path.as_str()),
+                    size,
+                    hash: resource.resource_hash.clone(),
+                    hash_type: ManifestHash::Md5
+                })
+            })
+            .collect()
+    }
+
     fn output_path(resource_path: &str, category: &str) -> Option<String> {
         let path = Self::category_path(resource_path, category).map(String::from);
         if path.is_none() {
@@ -104,6 +127,7 @@ mod tests {
 
     use super::GlobalStrategy;
     use crate::download::ResourceCategory;
+    use crate::download::manifest::ManifestHash;
 
     fn resource(path: &str, hash: &str, size: i64) -> Resource {
         Resource {
@@ -149,6 +173,36 @@ mod tests {
             "https://cdn.example/Preload/MediaResources/Audio/VOC_JP/JP_Momoi/Momoi_Title.ogg"
         );
         assert_eq!(downloads.tables[0].path, "ExcelDB.db");
+    }
+
+    #[test]
+    fn catalog_files_list_only_skipped_catalog_entries() {
+        let resources = vec![
+            resource(
+                "Catalog/Android/catalog_Android.bytes",
+                "ce3a20fd00fe3309982696f5f6c5f140",
+                69_043_710
+            ),
+            resource(
+                "Catalog/Android/catalog_Android.hash",
+                "0123456789abcdef0123456789abcdef",
+                32
+            ),
+            resource("Catalog/Broken.bytes", "0123456789abcdef0123456789abcdef", -1),
+            resource("GameData/TableBundles/ExcelDB.db", "00000000000000000000000000000000", 1),
+        ];
+
+        let files = GlobalStrategy::catalog_files(&resources, "https://cdn.example/");
+
+        let paths: Vec<_> = files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, [
+            "Catalog/Android/catalog_Android.bytes",
+            "Catalog/Android/catalog_Android.hash"
+        ]);
+        assert_eq!(files[0].url, "https://cdn.example/Catalog/Android/catalog_Android.bytes");
+        assert_eq!(files[0].size, 69_043_710);
+        assert_eq!(files[0].hash, "ce3a20fd00fe3309982696f5f6c5f140");
+        assert_eq!(files[0].hash_type, ManifestHash::Md5);
     }
 
     #[test]

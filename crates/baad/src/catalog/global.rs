@@ -15,7 +15,7 @@ use tracing::{info, warn};
 use crate::api::{NexonClient, StoreClient};
 use crate::catalog::traits::Catalog;
 use crate::cdn::GlobalCdn;
-use crate::download::ResourceCategory;
+use crate::download::{CatalogFile, ResourceCategory};
 use crate::error::CatalogError;
 use crate::strategy::GlobalStrategy;
 
@@ -236,6 +236,10 @@ impl Catalog for GlobalCatalog {
 
     fn build_downloads(&self, resources: Self::Resources, url: &str) -> Downloads {
         GlobalStrategy::build_downloads(resources.resources, url, self.category)
+    }
+
+    fn catalog_files(&self, resources: &Self::Resources, url: &str) -> Vec<CatalogFile> {
+        GlobalStrategy::catalog_files(&resources.resources, url)
     }
 }
 

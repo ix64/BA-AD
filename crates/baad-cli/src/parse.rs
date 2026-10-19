@@ -139,6 +139,7 @@ impl CommandHandler {
         } else {
             info!(success = true, "Catalog fetched successfully");
         }
+        let catalogs = catalog.catalog_files(&resources, &source);
         let mut downloads = catalog.build_downloads(resources, &source);
         for asset in &mut downloads.assets {
             Self::categorize_path(ASSET_BUNDLES, &mut asset.path);
@@ -159,7 +160,8 @@ impl CommandHandler {
                 build: build.to_lowercase(),
                 version: catalog.version().await,
                 source,
-                resources: manifest::plan(&downloads, filter.as_ref())
+                resources: manifest::plan(&downloads, filter.as_ref()),
+                catalogs
             };
             manifest.save(path).await?;
             info!(
