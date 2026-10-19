@@ -1,7 +1,6 @@
 use baad_shared::{
     BundlePatchPackInfo,
     JapanAddressable,
-    MEDIA_RESOURCES,
     MediaCatalog,
     Platform,
     TABLE_BUNDLES,
@@ -79,9 +78,18 @@ impl JapanCdn {
         self.fetch_catalog(&url, "TableCatalog.bytes").await
     }
 
+    /// Each platform publishes its own media catalog beside its media files: Windows media
+    /// (for example its higher resolution videos) differ in size and CRC from Android's.
     pub async fn fetch_media(&self) -> Result<MediaCatalog, CatalogError> {
-        let url = fconcat!("/"; self.catalog_url.as_str(), const { MEDIA_RESOURCES }, "Catalog", "MediaCatalog.bytes");
-        self.fetch_catalog(&url, "MediaCatalog.bytes").await
+        let (url, cache) = Self::media_catalog(&self.catalog_url, self.platform);
+        self.fetch_catalog(&url, &cache).await
+    }
+
+    /// The media catalog URL of `platform` and its platform-scoped cache file name.
+    fn media_catalog(catalog_url: &str, platform: Platform) -> (String, String) {
+        let url = fconcat!("/"; catalog_url, platform.media_path(), "Catalog", "MediaCatalog.bytes");
+        let name = platform.as_ref().to_lowercase();
+        (url, fconcat!(name.as_str(), "/MediaCatalog.bytes"))
     }
 
     async fn fetch_catalog<T: MemoryPackDeserialize>(
@@ -99,5 +107,31 @@ impl JapanCdn {
 
     fn hash_url(url: &str) -> String {
         url.strip_suffix(".bytes").map_or_else(|| url.into(), |stem| fconcat!(stem, ".hash"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use baad_shared::Platform;
+
+    use super::JapanCdn;
+
+    #[test]
+    fn media_catalogs_follow_the_platform_media_path() {
+        let root = "https://cdn.test/r96_x";
+        assert_eq!(
+            JapanCdn::media_catalog(root, Platform::Android),
+            (
+                "https://cdn.test/r96_x/MediaResources/Catalog/MediaCatalog.bytes".into(),
+                "android/MediaCatalog.bytes".into()
+            )
+        );
+        assert_eq!(
+            JapanCdn::media_catalog(root, Platform::Windows),
+            (
+                "https://cdn.test/r96_x/MediaResources-Windows/Catalog/MediaCatalog.bytes".into(),
+                "windows/MediaCatalog.bytes".into()
+            )
+        );
     }
 }
