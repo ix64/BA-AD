@@ -36,7 +36,24 @@ pub struct Manifest {
     pub version: Option<String>,
     /// Catalog root or base URL that resource URLs were built from.
     pub source: String,
-    pub resources: Vec<ManifestEntry>
+    pub resources: Vec<ManifestEntry>,
+    /// Catalog files the resource catalog publishes but the plan does not
+    /// download, such as Global's Unity Addressables catalog, so callers can
+    /// check their own copies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub catalogs: Vec<CatalogFile>
+}
+
+/// A catalog file with the URL, size and checksum the resource catalog
+/// publishes for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogFile {
+    /// Path relative to the manifest `source`, separated by `/`.
+    pub path: String,
+    pub url: String,
+    pub size: u64,
+    pub hash: String,
+    pub hash_type: ManifestHash
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -424,7 +441,8 @@ mod tests {
             build: "standard".into(),
             version: Some("1.0.0".into()),
             source: "https://cdn.test".into(),
-            resources
+            resources,
+            catalogs: Vec::new()
         }
     }
 
@@ -482,6 +500,24 @@ mod tests {
         let unchecked = &plan(&downloads(), Some(&filter))[0];
         assert_eq!(unchecked.member.as_deref(), Some("ch0231-b.bundle"));
         assert_eq!((unchecked.size, unchecked.hash.as_deref()), (None, None));
+        Ok(())
+    }
+
+    #[test]
+    fn catalogs_are_optional_and_omitted_when_empty() -> Result<(), serde_json::Error> {
+        let mut value = serde_json::to_value(manifest(Vec::new()))?;
+        assert!(value.get("catalogs").is_none());
+
+        value["catalogs"] = serde_json::json!([{
+            "path": "Catalog/Android/catalog_Android.bytes",
+            "url": "https://cdn.test/Catalog/Android/catalog_Android.bytes",
+            "size": 4,
+            "hash": "755f85c2723bb39381c7379a604160d8",
+            "hash_type": "md5"
+        }]);
+        let parsed: Manifest = serde_json::from_value(value)?;
+        assert_eq!(parsed.catalogs[0].size, 4);
+        assert_eq!(parsed.catalogs[0].hash_type, ManifestHash::Md5);
         Ok(())
     }
 

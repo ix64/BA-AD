@@ -6,5 +6,5 @@ pub mod resource;
 
 pub use downloader::*;
 pub use filter::*;
-pub use manifest::{Manifest, ManifestEntry, ManifestError, Report};
+pub use manifest::{CatalogFile, Manifest, ManifestEntry, ManifestError, Report};
 pub use resource::*;
